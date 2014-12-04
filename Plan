@@ -1,0 +1,233 @@
+Project: pong - single player version of classic video ping pon
+
+
+PURPOSE:
+To exercise signal handling and the curses library to make an event-driven
+game and understand timers and signal handling. It's also
+an opportunity to organize a program with many objects whose states
+have an interdependent posture on the flow and behavior of the program.
+Also to make something fun.
+
+
+OUTLINE:
+
+Objects:
+I have broken the game down into the following components, each of which in the
+current design is a "singleton" - there is currently only 1 of each object
+and so the publicly available functions only operate on the single instance
+of that object. Each object maintains the state of its data, and its the 
+interface that allows for operating on that data. In some cases, the object
+will have publicly available functions to retrieve the object state data.
+
+	Ball (pball.h/c):
+The ball object maintains state that controls its speed and direction. 
+The ball establishes a range of random numbers that
+can be used to randomize the speed and direction of the ball. The range and 
+amplitude of those random values a function of the width of the court: The wider 
+the court, the faster the ball goes. 
+It has logic to change state based on its relationship to the boundaries of 
+the court as well as the paddle.It doesn't directly know about the court 
+or paddle, rather, it calls into the referee which uses its references to 
+the court and paddle to tell the ball where it is. Using the referee as 
+an intermediary theoretically allows for the decoupling of ball behavior 
+from paddle/court attributes. The ball has logic to serve itself using
+random speed and direction, as well as logic to randomize the speed
+and direction when the referee tells it that it has hit the paddle. When
+the referee tells the ball it is Out of Bounds, it will automatically re-serve
+itself. 
+
+	Court (pcourt.h/c):
+The court object is responsible for drawing the boundaries and maintaining
+the state of the court. It also exposes public access to the geometry of the
+court so other elements in the game can perform behavioral logic based
+on the relation of objects to the court geometry - specifically ball bouncing
+and paddle bounds.
+
+	Paddle (ppaddle.h/c):
+The paddle object draws and maintains state of the paddle. It also contains 
+logic to govern the bounds of its movement as well alert the referee when it has 
+moved. The paddle is roughly 1/3 of the court height, which it calculates upon
+paddle_init(). It maintains a reference to the court geometry, so that when
+it moves it checks whether it's at the court boundary. Also, when it does move
+it lets the referee know so the referee can see if the ball needs to bounce. It
+calls out to the referee so that the ball and paddle are decoupled - this would
+allow, for example, different rules or behaviors (managed by the referee or ball)
+to determine what happens when paddle movement has an impact on another object.
+
+	Jumbotron (pjmbtrn.h/c):
+The jumbotron draws and maintains state for the "balls left" display as well
+as the elapsed time clock. It gets the court geometry on init and draws
+the labels and value fields in the appropriate locations. It keeps a "delay
+counter" equal to the number of ticks/second, and when the counter fills
+it updates elapsed time by 1 second.
+
+
+	Referee (preferee.h/c):
+The referee is largely a broker between the paddle and the ball. Every time
+either of them moves, they call out to the referee to report on where the ball
+is. The referee doesn't really "enforce" the ball or paddle behavior, rather,
+it acts as the "official" that determines "where" the ball and paddle are. The
+referee exists largely as the manager of the interactions between ball and
+paddle, especially if the game is extended to multi-ball, multi-paddle or some
+other variation. For example, if we added multiple balls, the referee could
+'register' each of them, and when the paddle moves, the paddle doesn't need
+to know anything about how many balls and where they are - the referee does. 
+The referee does manage the ball count and issues the update to the jumbotron
+when a ball goes out of bounds. The referee also stops the game when all
+balls are exhausted, giving the player a chance to play again.
+referee_restart_game() will reset the timer and ball count, and re-serve() 
+the ball.
+
+
+Library and Main:
+	Ponglib (ponglib.h/c):
+The ponglib contains utility functions as well as functions used by
+main(). Namely, it has a random_value function as well as the alarm signal
+handler. The handle_tick() function both updates the elapsed time on the 
+jumbotron, and issues the ball_move() command. The ponglib also has 
+functions that "lock/unlock" the current drawing state of the application.
+Every section of code that uses curses to draw must first call "start_draw"
+and then "end_draw" when drawing is done. It is possible that some drawing 
+won't take place if something else is currently drawing, but the game state
+updates independent of the drawing so the data should still have integrity. This
+is a crude way to deal with race conditions in which multiple functions may 
+want to draw at the same time.
+
+
+	main():
+main() is pretty simple. it sets up the game by initializing all of the 
+components and setting up a sigaction that sets the handler for SIGALRM to 
+handle_tick() in ponglib. Then it blocks on user input and calls paddle_up/down,
+quit, or restart depending on the keystroke entered. If the user quits, the 
+game stops and curses closes down. If the user types 'r' to restart the game
+
+
+			
+
+
+
+OUTPUT:
+The COURT will be drawn with a left wall made up of "|" characters
+and top/bottom walls made of "_" characters. It will be positioned
+such that each wall has a buffer of 3 units from the edge tof the
+window.
+
+The JUMBOTRON will be drawn 1 unit above the top wall. The left
+element will read "BALLS LEFT: xx" displaying the remaining ball count
+and the right element will read TOTAL TIME: xx:xx, displaying
+the elapsed time in min:sec. When 1 second elapses, the clock will
+update, and when a ball is lost, the balls left counter will decrement.
+
+The PADDLE will be drawn vertically 3 units from the right edge of the
+window and will be approximately 1/3 the height of the court.
+
+The BALL will be drawn as a "O" and served immediately from the 
+center of the court at a random speed and diagonal direction upon 
+the start  of the game. It will change vertical direction when 
+hitting the top or bottom wall, and horizontal direction when
+hitting the paddle or the left wall. It will change both directions
+when it hits a corner. The speed of the ball is controlled by a function
+of the "number of ticks/second", as well as the "x/y delay" values 
+in the ball. The delay values are modified randomly (within a fixed range,
+derived from the width of the court) when the ball is served and 
+when it hits the paddle.
+	
+
+ARGUMENTS:
+	None
+
+
+INPUT:
+Once the game is started,
+The user can hit the "k" and "m" keys to move the paddle up and down,
+respectively. The user can type "Q" to quit the game.
+
+
+
+DATA STRUCTURES:
+
+Ball:
+typedef struct {
+	int x_delay, x_pos, x_dir, x_count,
+		y_delay, y_pos, y_dir, y_count,
+		y_srv, x_srv;
+	chtype symbol;
+} ppball;
+
+
+Court: 
+typedef struct {
+	int top;		/*The top edge of the court*/
+	int bottom;		/*The bot edge of the court*/
+	int left;		/*The left edge of the court*/
+	int right;		/*The right edge of the court*/
+	chtype h_char;	/*The char for top and bot edge*/
+	chtype v_char;	/*The char for the left edge*/
+} ppcourt;
+
+Jumbotron: Note, I store the y,x positions of the updatabable values
+(the timer and the ball count), in case I ever added functionality
+to move the jumbotron in response a screen or court resize (or some
+other feature that might change the geometry of the layout).
+typedef struct {
+	int x_pos;			/*The starting x position of the jumbotron*/
+	int y_pos;			/*The y position of the jumbotron*/
+	int ball_cnt_x;		/*The x position of the ball count VALUE*/
+	int ball_cnt_y;		/*The y position of the ball count VALUE*/
+	int time_disp_x;	/*The x position of the elapsed time VALUE*/
+	int time_disp_y;	/*The y position of the elapsed time VALUE*/
+	int clock_value;	/*Store # ticks since last second update*/
+	int clock_delay;	/*#ticks until the timer updates*/
+} ppjmbtrn;
+
+
+Paddle: Note that the col will likely be fixed, but
+could change if functionality were added to move the paddle left and
+right, for example.
+typedef struct {
+	int top,		/*The current top of the paddle*/
+		bottom, 	/*The current bottom of the paddle*/
+		col, 		/*The col the paddle*/
+		height;		/*The height of the paddle*/
+	chtype pad_char;/*The char used to draw the paddle*/
+} ppaddle;
+
+
+Referee: Doesn't have a state struct, but does call into
+court, ball and paddle. Referee defines
+a bitset to determine the current "position" of the ball,
+as reported from the referee_check_ball() function.
+I use a bitset because there might be more than 1 relevant
+position. For example, rather than capture the "top left corner"
+as a specific location, the referee returns a bit mask with
+both the TOP_ROW and LEFT_WALL bits set.
+
+
+Draw Lock Global variable: The ponglib.c uses a global 
+variable to keep track of the "draw" state of the application.
+Every section where curses updates are made must be wrapped in calls
+to start_draw() and end_draw() to lock and unlock the application's 
+drawing state. If start_draw() is called while drawing is locked, 
+then that draw operation will be skipped, but the underlying data
+structures will be set appropriately.
+
+
+Files:
+pong.c
+ponglib.c
+ponglib.h
+pball.c
+pball.h
+ppaddle.c
+ppaddle.h
+pcourt.c
+pcourt.h
+pjmbtrn.c
+pjmbtrn.h
+preferee.c
+preferee.h
+
+Plan - Contains a design overview
+
+Makefile	- Contains command for building the program.
+              "make pong" will clean and build the application.
