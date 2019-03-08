@@ -1,4 +1,3 @@
-w
 //Bitset used to populate the bitmask
 //that's returned from referee_check_ball
 #define BALL_TOP_WALL (1 << 0)
